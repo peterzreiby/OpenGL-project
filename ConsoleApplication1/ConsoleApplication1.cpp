@@ -35,7 +35,10 @@ const float PI = 3.14159265f;
 
 // ── Animation state ─────────────────────────────────────────
 float gTime = 0.0f;   // global timer (seconds, incremented per frame)
-float gLightAngle = 0.0f;   // lighthouse beam rotation angle (degrees)
+// Beacon sweeps left↔right only (like a real lighthouse horizontal sweep).
+// We use cos(gTime) to oscillate the beam angle between ~150° and ~30°
+// (pointing left across the sea to pointing right) — never going up/down.
+float gLightAngle = 0.0f;   // lighthouse beam angle (degrees), increments each frame for full 360° rotation
 
 // Birds: 4 birds, each stores (x, y, phase)
 struct Bird { float x, y, phase; };
@@ -165,70 +168,70 @@ void drawWater()
 }
 
 // ── Boat (display list, centred at origin, hull bottom at y=0) ──
-//   Width ~80, height ~50
+//   Simple fishing boat: hull + mast + sail only. No cabin/house shapes.
 void buildBoatList()
 {
     dlBoat = glGenLists(1);
     glNewList(dlBoat, GL_COMPILE);
 
-    // Hull — dark reddish-brown
+    // Hull — dark reddish-brown trapezoid
     setColor(0.45f, 0.22f, 0.08f);
     glBegin(GL_POLYGON);
-    glVertex2f(-40.0f, 0.0f);    // bow left
-    glVertex2f(40.0f, 0.0f);    // bow right
-    glVertex2f(50.0f, -20.0f);   // stern right
-    glVertex2f(-50.0f, -20.0f);   // stern left
+    glVertex2f(-40.0f, 0.0f);   // top-left
+    glVertex2f(40.0f, 0.0f);   // top-right
+    glVertex2f(48.0f, -22.0f);   // bottom-right (wider at bottom = boat shape)
+    glVertex2f(-48.0f, -22.0f);   // bottom-left
     glEnd();
 
-    // Deck — lighter wood
-    setColor(0.70f, 0.45f, 0.18f);
+    // Deck strip — lighter wood colour
+    setColor(0.70f, 0.48f, 0.20f);
     glBegin(GL_QUADS);
     glVertex2f(-38.0f, 0.0f);
     glVertex2f(38.0f, 0.0f);
-    glVertex2f(38.0f, 6.0f);
-    glVertex2f(-38.0f, 6.0f);
+    glVertex2f(38.0f, 5.0f);
+    glVertex2f(-38.0f, 5.0f);
     glEnd();
 
-    // Cabin
-    setColor(0.90f, 0.88f, 0.80f);
+    // Small steering post (not a house — just a thin box)
+    setColor(0.60f, 0.38f, 0.15f);
     glBegin(GL_QUADS);
-    glVertex2f(-15.0f, 6.0f);
-    glVertex2f(15.0f, 6.0f);
-    glVertex2f(15.0f, 26.0f);
-    glVertex2f(-15.0f, 26.0f);
-    glEnd();
-    // Cabin roof
-    setColor(0.80f, 0.20f, 0.10f);
-    glBegin(GL_TRIANGLES);
-    glVertex2f(-18.0f, 26.0f);
-    glVertex2f(18.0f, 26.0f);
-    glVertex2f(0.0f, 36.0f);
+    glVertex2f(-6.0f, 5.0f);
+    glVertex2f(6.0f, 5.0f);
+    glVertex2f(6.0f, 14.0f);
+    glVertex2f(-6.0f, 14.0f);
     glEnd();
 
-    // Mast
-    setColor(0.55f, 0.40f, 0.20f);
+    // Mast — vertical pole
+    setColor(0.50f, 0.35f, 0.15f);
     glLineWidth(3.0f);
     glBegin(GL_LINES);
-    glVertex2f(0.0f, 6.0f);
-    glVertex2f(0.0f, 65.0f);
+    glVertex2f(0.0f, 5.0f);
+    glVertex2f(0.0f, 70.0f);
     glEnd();
 
-    // Sail
-    setColor(0.97f, 0.97f, 0.92f);
+    // Main sail — large triangle
+    setColor(0.97f, 0.97f, 0.93f);
     glBegin(GL_TRIANGLES);
-    glVertex2f(0.0f, 60.0f);
-    glVertex2f(0.0f, 14.0f);
-    glVertex2f(35.0f, 30.0f);
+    glVertex2f(0.0f, 68.0f);   // top of mast
+    glVertex2f(0.0f, 10.0f);   // bottom of sail on mast
+    glVertex2f(40.0f, 28.0f);   // sail tip (wind-out)
     glEnd();
 
-    // Windows
-    setColor(0.60f, 0.85f, 1.00f);
-    glBegin(GL_QUADS);
-    glVertex2f(-12.0f, 12.0f); glVertex2f(-4.0f, 12.0f);
-    glVertex2f(-4.0f, 22.0f); glVertex2f(-12.0f, 22.0f);
+    // Boom (horizontal bar at bottom of sail)
+    setColor(0.50f, 0.35f, 0.15f);
+    glBegin(GL_LINES);
+    glVertex2f(0.0f, 10.0f);
+    glVertex2f(40.0f, 10.0f);
+    glEnd();
 
-    glVertex2f(4.0f, 12.0f); glVertex2f(12.0f, 12.0f);
-    glVertex2f(12.0f, 22.0f); glVertex2f(4.0f, 22.0f);
+    // Hull outline for crispness
+    setColor(0.28f, 0.12f, 0.04f);
+    glLineWidth(1.5f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(-40.0f, 0.0f);
+    glVertex2f(40.0f, 0.0f);
+    glVertex2f(48.0f, -22.0f);
+    glVertex2f(-48.0f, -22.0f);
     glEnd();
 
     glLineWidth(1.0f);
@@ -333,48 +336,62 @@ void drawLighthouse()
 }
 
 // ── Lighthouse rotating beam ─────────────────────────────────
-//   Drawn using the rotation formula from Ch4a §2 / Trig §4:
-//   x' = x cosθ − y sinθ
-//   y' = x sinθ + y cosθ
-void drawBeam(float angleDeg)
+//   The beam sweeps LEFT ↔ RIGHT across the sea only —
+//   it never points upward or spins vertically.
+//
+//   Approach (from Trig §1, §4):
+//     angle = midAngle + amplitude * cos(speed * time)
+//   where midAngle = 180° (pointing straight left, i.e. out to sea)
+//   and amplitude = 70°, so the beam sweeps from ~110° to ~250°
+//   (all safely in the left / sea-facing semicircle).
+//
+//   The beam gets shorter as cos(angle_from_horizontal) decreases so
+//   it appears to reach further when aimed straight out to sea.
+void drawBeam()
 {
-    float rad = angleDeg * PI / 180.0f;
     float cx = LH_X;
     float cy = LH_BASE_Y + 156.0f; // centre of lamp room
 
+    // Beacon rotates full 360° continuously — left to right (counterclockwise).
+    // gLightAngle accumulates in the timer and drives the full rotation.
+    float rad = gLightAngle * PI / 180.0f;
+
     float beamLen = 320.0f;
 
-    // Two beam rays (± 8 degrees) — triangle fan
-    float a1 = rad - 0.14f;
-    float a2 = rad + 0.14f;
+    float halfSpread = 0.13f; // ~7.5 degrees half-width of the cone
+    float a1 = rad - halfSpread;
+    float a2 = rad + halfSpread;
 
-    // Yellow semi-transparent beam
+    // Semi-transparent yellow cone
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glColor4f(1.0f, 0.95f, 0.30f, 0.35f);
+    glColor4f(1.0f, 0.95f, 0.25f, 0.30f);
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(cx, cy);
-    glVertex2f(cx + beamLen * cosf(a1), cy + beamLen * sinf(a1));
-    glVertex2f(cx + beamLen * cosf(a2), cy + beamLen * sinf(a2));
+    // Fan of 8 rays to make a smooth cone
+    for (int s = 0; s <= 8; s++) {
+        float a = a1 + (a2 - a1) * s / 8.0f;
+        glVertex2f(cx + beamLen * cosf(a), cy + beamLen * sinf(a));
+    }
     glEnd();
     glDisable(GL_BLEND);
 
-    // Bright core line
-    setColor(1.0f, 1.0f, 0.60f);
-    glLineWidth(2.5f);
+    // Bright solid core line along beam centre
+    setColor(1.0f, 1.0f, 0.55f);
+    glLineWidth(2.0f);
     glBegin(GL_LINES);
     glVertex2f(cx, cy);
     glVertex2f(cx + beamLen * cosf(rad), cy + beamLen * sinf(rad));
     glEnd();
     glLineWidth(1.0f);
 
-    // Bright lamp centre circle
+    // Glowing lamp dot at centre
     setColor(1.0f, 0.98f, 0.70f);
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(cx, cy);
     for (int i = 0; i <= 20; i++) {
         float a = 2.0f * PI * i / 20;
-        glVertex2f(cx + 6 * cosf(a), cy + 6 * sinf(a));
+        glVertex2f(cx + 7 * cosf(a), cy + 7 * sinf(a));
     }
     glEnd();
 }
@@ -443,7 +460,122 @@ void drawDock()
     glLineWidth(1.0f);
 }
 
-// ── Hills / land on the horizon ──────────────────────────────
+// ── Small houses on the green hills ──────────────────────────
+//   Each house is drawn at a fixed (x, hillY) position where hillY
+//   matches the hill polygon height at that x, so they sit on the land.
+//   Uses the parameterised house pattern from Ch3 §7.
+void drawHouse(float x, float groundY, float scale)
+{
+    float w = 38.0f * scale;   // half-width of house body
+    float h = 30.0f * scale;   // house body height
+    float rh = 18.0f * scale;   // roof extra height
+
+    // House body (walls)
+    setColor(0.88f, 0.82f, 0.72f);
+    glBegin(GL_QUADS);
+    glVertex2f(x - w, groundY);
+    glVertex2f(x + w, groundY);
+    glVertex2f(x + w, groundY + h);
+    glVertex2f(x - w, groundY + h);
+    glEnd();
+
+    // Roof (triangle)
+    setColor(0.72f, 0.18f, 0.10f);
+    glBegin(GL_TRIANGLES);
+    glVertex2f(x - w - 4 * scale, groundY + h);
+    glVertex2f(x + w + 4 * scale, groundY + h);
+    glVertex2f(x, groundY + h + rh);
+    glEnd();
+
+    // Door
+    setColor(0.45f, 0.25f, 0.08f);
+    float dw = 7.0f * scale;
+    float dh = 14.0f * scale;
+    glBegin(GL_QUADS);
+    glVertex2f(x - dw, groundY);
+    glVertex2f(x + dw, groundY);
+    glVertex2f(x + dw, groundY + dh);
+    glVertex2f(x - dw, groundY + dh);
+    glEnd();
+
+    // Left window
+    setColor(0.60f, 0.85f, 1.00f);
+    float ww = 7.0f * scale;
+    float wh = 8.0f * scale;
+    float wy = groundY + h * 0.45f;
+    glBegin(GL_QUADS);
+    glVertex2f(x - w + 5 * scale, wy);
+    glVertex2f(x - w + 5 * scale + ww, wy);
+    glVertex2f(x - w + 5 * scale + ww, wy + wh);
+    glVertex2f(x - w + 5 * scale, wy + wh);
+    glEnd();
+
+    // Right window
+    glBegin(GL_QUADS);
+    glVertex2f(x + w - 5 * scale - ww, wy);
+    glVertex2f(x + w - 5 * scale, wy);
+    glVertex2f(x + w - 5 * scale, wy + wh);
+    glVertex2f(x + w - 5 * scale - ww, wy + wh);
+    glEnd();
+
+    // Window cross (mullions)
+    setColor(0.50f, 0.70f, 0.90f);
+    glLineWidth(1.5f);
+    // left window
+    glBegin(GL_LINES);
+    glVertex2f(x - w + 5 * scale + ww / 2, wy);
+    glVertex2f(x - w + 5 * scale + ww / 2, wy + wh);
+    glVertex2f(x - w + 5 * scale, wy + wh / 2);
+    glVertex2f(x - w + 5 * scale + ww, wy + wh / 2);
+    glEnd();
+    // right window
+    glBegin(GL_LINES);
+    glVertex2f(x + w - 5 * scale - ww / 2, wy);
+    glVertex2f(x + w - 5 * scale - ww / 2, wy + wh);
+    glVertex2f(x + w - 5 * scale - ww, wy + wh / 2);
+    glVertex2f(x + w - 5 * scale, wy + wh / 2);
+    glEnd();
+    glLineWidth(1.0f);
+
+    // Chimney
+    setColor(0.60f, 0.35f, 0.20f);
+    float chx = x + w * 0.4f;
+    float chw = 5.0f * scale;
+    float chh = 12.0f * scale;
+    glBegin(GL_QUADS);
+    glVertex2f(chx - chw, groundY + h + rh * 0.5f);
+    glVertex2f(chx + chw, groundY + h + rh * 0.5f);
+    glVertex2f(chx + chw, groundY + h + rh * 0.5f + chh);
+    glVertex2f(chx - chw, groundY + h + rh * 0.5f + chh);
+    glEnd();
+}
+
+void drawHouses()
+{
+    // Hill surface heights at these x positions (read from drawLand polygon):
+    // The hill polygon passes through:
+    //   x=0   → y = WATER_Y + 40
+    //   x=80  → y = WATER_Y + 70
+    //   x=200 → y = WATER_Y + 50
+    //   x=340 → y = WATER_Y + 35
+    //   x=500 → y = WATER_Y + 55
+    //   x=680 → y = WATER_Y + 80
+    // We interpolate linearly and add a small margin so houses sit ON the hill.
+
+    // House 1 — between x=80 and x=200, near the first peak
+    drawHouse(130.0f, WATER_Y + 62.0f, 0.75f);
+
+    // House 2 — near x=200 on the gentle slope
+    drawHouse(240.0f, WATER_Y + 47.0f, 0.65f);
+
+    // House 3 — around x=500, on the second rise
+    drawHouse(490.0f, WATER_Y + 52.0f, 0.70f);
+
+    // House 4 — near x=610 heading toward the tall peak at 680
+    drawHouse(600.0f, WATER_Y + 65.0f, 0.60f);
+}
+
+
 void drawLand()
 {
     setColor(0.25f, 0.50f, 0.22f);
@@ -515,6 +647,9 @@ void display()
     // ── Land behind water ──
     drawLand();
 
+    // ── Houses on the hills (drawn after land so they sit on top) ──
+    drawHouses();
+
     // ── Water ──
     drawWater();
     drawReflections();
@@ -535,7 +670,7 @@ void display()
 
     // ── Lighthouse ──
     drawLighthouse();
-    drawBeam(gLightAngle);
+    drawBeam();
 
     // ── Birds ──
     for (int i = 0; i < 4; i++)
@@ -547,11 +682,12 @@ void display()
 // ── Timer / animation ────────────────────────────────────────
 void timer(int /*value*/)
 {
-    const float dt = 1.0f / 60.0f;  // 60 fps target
+    const float dt = 1.0f / 60.0f;
     gTime += dt;
 
-    // Rotate lighthouse beam — 1 full revolution every 3 seconds
-    gLightAngle += 2.0f;            // degrees per frame at 60fps ≈ 120°/s
+    // Lighthouse beam rotates full 360° left→right continuously.
+    // 1.2 degrees per frame at 60fps = ~72°/sec = one full rotation every ~5 seconds.
+    gLightAngle += 1.2f;
     if (gLightAngle >= 360.0f) gLightAngle -= 360.0f;
 
     // Move birds left to right; wrap around
